@@ -9,6 +9,13 @@ export PYOPENGL_PLATFORM="egl"
 
 export ROBOTWIN_PATH=${ROBOTWIN_PATH:-"/path/to/RoboTwin"}
 export PYTHONPATH=${REPO_PATH}:${ROBOTWIN_PATH}:$PYTHONPATH
+PYTHON_BIN=${PYTHON_BIN:-$(command -v python)}
+export RAY_PYTHON_EXECUTABLE=${RAY_PYTHON_EXECUTABLE:-$PYTHON_BIN}
+
+# NCCL runtime stability defaults (can be overridden by external envs).
+export NCCL_CUMEM_ENABLE=${NCCL_CUMEM_ENABLE:-0}
+export NCCL_NVLS_ENABLE=${NCCL_NVLS_ENABLE:-0}
+export TORCH_NCCL_AVOID_RECORD_STREAMS=${TORCH_NCCL_AVOID_RECORD_STREAMS:-1}
 
 # Base path to the BEHAVIOR dataset, which is the BEHAVIOR-1k repo's dataset folder
 # Only required when running the behavior experiment.
@@ -34,10 +41,12 @@ ROBOT_PLATFORM=${2:-${ROBOT_PLATFORM:-"LIBERO"}}
 export ROBOT_PLATFORM
 echo "Using ROBOT_PLATFORM=$ROBOT_PLATFORM"
 
-echo "Using Python at $(which python)"
+echo "Using Python at ${PYTHON_BIN}"
+echo "Using RAY_PYTHON_EXECUTABLE=${RAY_PYTHON_EXECUTABLE}"
+echo "NCCL_CUMEM_ENABLE=${NCCL_CUMEM_ENABLE}, NCCL_NVLS_ENABLE=${NCCL_NVLS_ENABLE}, TORCH_NCCL_AVOID_RECORD_STREAMS=${TORCH_NCCL_AVOID_RECORD_STREAMS}"
 LOG_DIR="${REPO_PATH}/logs/$(date +'%Y%m%d-%H:%M:%S')-${CONFIG_NAME}" #/$(date +'%Y%m%d-%H:%M:%S')"
 MEGA_LOG_FILE="${LOG_DIR}/run_embodiment.log"
 mkdir -p "${LOG_DIR}"
-CMD="python ${SRC_FILE} --config-path ${EMBODIED_PATH}/config/ --config-name ${CONFIG_NAME} runner.logger.log_path=${LOG_DIR}"
+CMD="${PYTHON_BIN} ${SRC_FILE} --config-path ${EMBODIED_PATH}/config/ --config-name ${CONFIG_NAME} runner.logger.log_path=${LOG_DIR}"
 echo ${CMD} > ${MEGA_LOG_FILE}
 ${CMD} 2>&1 | tee -a ${MEGA_LOG_FILE}

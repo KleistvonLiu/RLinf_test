@@ -115,6 +115,7 @@ class NvidiaGPUManager(AcceleratorManager):
 
         # NCCL env vars
         env_vars["NCCL_CUMEM_ENABLE"] = "0"
+        env_vars["NCCL_NVLS_ENABLE"] = "0"
         env_vars["TORCH_NCCL_AVOID_RECORD_STREAMS"] = "1"
         if os.environ.get("NCCL_CUMEM_ENABLE", "0") != "0":
             warnings.warn(
@@ -123,6 +124,11 @@ class NvidiaGPUManager(AcceleratorManager):
                 "https://github.com/NVIDIA/nccl/issues/1234, and thus set to 0 by both vLLM and SGLang, see https://github.com/vllm-project/vllm/pull/24141.",
             )
             env_vars["NCCL_CUMEM_ENABLE"] = os.environ["NCCL_CUMEM_ENABLE"]
+        if os.environ.get("NCCL_NVLS_ENABLE", "0") != "0":
+            warnings.warn(
+                f"NCCL_NVLS_ENABLE is set to {os.environ['NCCL_NVLS_ENABLE']}. Keep using the user-specified value."
+            )
+            env_vars["NCCL_NVLS_ENABLE"] = os.environ["NCCL_NVLS_ENABLE"]
 
         return env_vars
 
