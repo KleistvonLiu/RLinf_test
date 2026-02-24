@@ -38,7 +38,9 @@ from rlinf.utils.utils import clear_memory
 
 
 class FSDP2Strategy(FSDPStrategyBase):
-    def wrap_model(self, model: nn.Module, device_mesh: DeviceMesh) -> FSDPModule:
+    def wrap_model(
+        self, model: nn.Module, device_mesh: DeviceMesh
+    ) -> Union[FSDPModule, nn.Module]:
         """
         Wrap the model with FSDP2's fully_shard.
 
@@ -47,8 +49,12 @@ class FSDP2Strategy(FSDPStrategyBase):
             - device_mesh (DeviceMesh): The device mesh for FSDP2.
 
         Returns:
-            - FSDPModule: The FSDP2 wrapped model.
+            - FSDPModule or nn.Module: The FSDP2 wrapped model, or raw module in
+                single-rank mode.
         """
+        if self.world_size <= 1:
+            return model.to(torch.device(f"cuda:{int(os.environ['LOCAL_RANK'])}"))
+
         mixed_precision_config = self.cfg.fsdp_config.mixed_precision
         param_dtype = torch_dtype_from_precision(mixed_precision_config.param_dtype)
         reduce_dtype = torch_dtype_from_precision(mixed_precision_config.reduce_dtype)
@@ -155,7 +161,7 @@ class FSDP2Strategy(FSDPStrategyBase):
 
     def clip_grad_norm_(
         self,
-        model: FSDPModule,
+        model: Union[FSDPModule, nn.Module],
         norm_type: Union[float, int] = 2.0,
     ) -> float:
         """
@@ -168,6 +174,18 @@ class FSDP2Strategy(FSDPStrategyBase):
         Returns:
             - float: The total norm of the gradients before clipping.
         """
+        if self.world_size <= 1:
+            grad_norm = (
+                torch.nn.utils.clip_grad_norm_(
+                    model.parameters(),
+                    max_norm=self.cfg.optim.clip_grad,
+                    norm_type=norm_type,
+                )
+                .cpu()
+                .item()
+            )
+            return grad_norm
+
         grad_norm = get_grad_norm(
             model.parameters(),
             dp_group=self._dp_group,
@@ -181,7 +199,7 @@ class FSDP2Strategy(FSDPStrategyBase):
         return grad_norm
 
     def before_micro_batch(
-        self, model: FSDPModule, is_last_micro_batch: bool
+        self, model: Union[FSDPModule, nn.Module], is_last_micro_batch: bool
     ) -> ContextManager:
         """
         Context manager to control gradient synchronization for FSDP2.
@@ -194,6 +212,8 @@ class FSDP2Strategy(FSDPStrategyBase):
         Returns:
             - ContextManager: nullcontext, just for interface consistency.
         """
+        if self.world_size <= 1:
+            return nullcontext()
         if not self.cfg.fsdp_config.enable_gradient_accumulation:
             return nullcontext()
         if is_last_micro_batch:

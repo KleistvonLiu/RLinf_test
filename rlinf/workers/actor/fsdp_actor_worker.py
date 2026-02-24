@@ -1247,7 +1247,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
                 assert (
                     train_global_batch_size
                     == self.cfg.actor.global_batch_size
-                    // torch.distributed.get_world_size()
+                    // self._world_size
                 )
                 assert train_global_batch_size % self.cfg.actor.micro_batch_size == 0, (
                     f"{train_global_batch_size=}, {self.cfg.actor.micro_batch_size}"

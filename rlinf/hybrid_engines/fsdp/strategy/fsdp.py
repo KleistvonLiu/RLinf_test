@@ -40,7 +40,9 @@ from rlinf.utils.utils import clear_memory
 
 
 class FSDPStrategy(FSDPStrategyBase):
-    def wrap_model(self, model: nn.Module, device_mesh: DeviceMesh) -> FSDP:
+    def wrap_model(
+        self, model: nn.Module, device_mesh: DeviceMesh
+    ) -> Union[FSDP, nn.Module]:
         """
         Wrap the model with FSDP using the specified configuration,
         it will apply mixed precision, sharding strategy, and wrapping policy.
@@ -50,8 +52,14 @@ class FSDPStrategy(FSDPStrategyBase):
             - device_mesh (DeviceMesh): The device mesh for distributed training.
 
         Returns:
-            - FSDP: The wrapped FSDP model.
+            - FSDP or nn.Module: The wrapped FSDP model, or raw module in
+                single-rank mode.
         """
+        if self.world_size <= 1:
+            # For single-rank training, skip FSDP wrapping to avoid unnecessary
+            # NCCL collectives in the training path.
+            return model.to(torch.device(f"cuda:{int(os.environ['LOCAL_RANK'])}"))
+
         mixed_precision_config = self.cfg.fsdp_config.mixed_precision
         param_dtype = torch_dtype_from_precision(mixed_precision_config.param_dtype)
         reduce_dtype = torch_dtype_from_precision(mixed_precision_config.reduce_dtype)
@@ -225,7 +233,7 @@ class FSDPStrategy(FSDPStrategyBase):
     @torch.no_grad()
     def clip_grad_norm_(
         self,
-        model: FSDP,
+        model: Union[FSDP, nn.Module],
         norm_type: Union[float, int] = 2.0,
     ) -> float:
         """
@@ -241,6 +249,12 @@ class FSDPStrategy(FSDPStrategyBase):
         device = torch.device(f"cuda:{int(os.environ['LOCAL_RANK'])}")
         max_norm = float(self.cfg.optim.clip_grad)
         norm_type = float(norm_type)
+        if self.world_size <= 1 or not hasattr(model, "_all_handles"):
+            return (
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm, norm_type)
+                .cpu()
+                .item()
+            )
         all_handles = getattr(model, "_all_handles", None)
         if all_handles is None:
             raise RuntimeError("Expected FSDP root module with `_all_handles`.")
@@ -336,7 +350,7 @@ class FSDPStrategy(FSDPStrategyBase):
         return grad_norm
 
     def before_micro_batch(
-        self, model: FSDP, is_last_micro_batch: bool
+        self, model: Union[FSDP, nn.Module], is_last_micro_batch: bool
     ) -> ContextManager:
         """
         Context manager for handling gradient synchronization during micro-batches for FSDP.
@@ -349,6 +363,8 @@ class FSDPStrategy(FSDPStrategyBase):
         Returns:
             - ContextManager: The context manager for gradient synchronization.
         """
+        if self.world_size <= 1:
+            return nullcontext()
         if self.cfg.fsdp_config.enable_gradient_accumulation:
             return model.no_sync() if not is_last_micro_batch else nullcontext()
         return nullcontext()
