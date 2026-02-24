@@ -88,11 +88,17 @@ def compute_evaluate_metrics(eval_metrics_list):
 
 def compute_rollout_metrics(data_buffer: dict) -> dict:
     rollout_metrics = {}
+    should_all_reduce = (
+        torch.distributed.is_initialized() and torch.distributed.get_world_size() > 1
+    )
 
     if "rewards" in data_buffer:
         rewards = data_buffer["rewards"].clone()
         mean_rewards = torch.mean(rewards).to(torch.cuda.current_device())
-        torch.distributed.all_reduce(mean_rewards, op=torch.distributed.ReduceOp.AVG)
+        if should_all_reduce:
+            torch.distributed.all_reduce(
+                mean_rewards, op=torch.distributed.ReduceOp.AVG
+            )
 
         rewards_metrics = {
             "rewards": mean_rewards.item(),
@@ -102,16 +108,18 @@ def compute_rollout_metrics(data_buffer: dict) -> dict:
     if "advantages" in data_buffer:
         advantages = data_buffer["advantages"]
         mean_adv = torch.mean(advantages).to(torch.cuda.current_device())
-        torch.distributed.all_reduce(mean_adv, op=torch.distributed.ReduceOp.AVG)
+        if should_all_reduce:
+            torch.distributed.all_reduce(mean_adv, op=torch.distributed.ReduceOp.AVG)
         max_adv = torch.max(advantages).detach().item()
         min_adv = torch.min(advantages).detach().item()
         reduce_adv_tensor = torch.as_tensor(
             [-min_adv, max_adv], device=torch.cuda.current_device(), dtype=torch.float32
         )
-        torch.distributed.all_reduce(
-            reduce_adv_tensor, op=torch.distributed.ReduceOp.MAX
-        )
-        min_adv, max_adv = reduce_adv_tensor.tolist()
+        if should_all_reduce:
+            torch.distributed.all_reduce(
+                reduce_adv_tensor, op=torch.distributed.ReduceOp.MAX
+            )
+            min_adv, max_adv = reduce_adv_tensor.tolist()
 
         advantages_metrics = {
             "advantages_mean": mean_adv.item(),
@@ -123,16 +131,18 @@ def compute_rollout_metrics(data_buffer: dict) -> dict:
     if data_buffer.get("returns", None) is not None:
         returns = data_buffer["returns"]
         mean_ret = torch.mean(returns).to(torch.cuda.current_device())
-        torch.distributed.all_reduce(mean_ret, op=torch.distributed.ReduceOp.AVG)
+        if should_all_reduce:
+            torch.distributed.all_reduce(mean_ret, op=torch.distributed.ReduceOp.AVG)
         max_ret = torch.max(returns).detach().item()
         min_ret = torch.min(returns).detach().item()
         reduce_ret_tensor = torch.as_tensor(
             [-min_ret, max_ret], device=torch.cuda.current_device(), dtype=torch.float32
         )
-        torch.distributed.all_reduce(
-            reduce_ret_tensor, op=torch.distributed.ReduceOp.MAX
-        )
-        min_ret, max_ret = reduce_ret_tensor.tolist()
+        if should_all_reduce:
+            torch.distributed.all_reduce(
+                reduce_ret_tensor, op=torch.distributed.ReduceOp.MAX
+            )
+            min_ret, max_ret = reduce_ret_tensor.tolist()
 
         returns_metrics = {
             "returns_mean": mean_ret.item(),

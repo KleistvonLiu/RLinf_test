@@ -524,6 +524,10 @@ def all_reduce_int(
     op: ReduceOp = ReduceOp.MIN,
     group: ProcessGroup = None,
 ):
+    if not torch.distributed.is_initialized():
+        return obj
+    if torch.distributed.get_world_size(group) <= 1:
+        return obj
     obj_tensor = torch.tensor(
         [obj], dtype=torch.long, device=torch.cuda.current_device()
     )
@@ -727,6 +731,10 @@ class VocabUtility:
 def all_reduce_dict(
     dictionary, dtype=torch.float32, group=None, op=torch.distributed.ReduceOp.SUM
 ):
+    if not torch.distributed.is_initialized():
+        return dictionary
+    if torch.distributed.get_world_size(group) <= 1:
+        return dictionary
     keys = sorted(dictionary)
     tensor = torch.as_tensor(
         [dictionary[k] for k in keys], dtype=dtype, device=torch.cuda.current_device()
