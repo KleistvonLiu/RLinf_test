@@ -31,12 +31,21 @@ export CARB_APP_PATH=${CARB_APP_PATH:-$ISAAC_PATH/kit}
 
 if [ -z "$1" ]; then
     CONFIG_NAME="maniskill_ppo_openvlaoft"
+    EXTRA_ARGS=()
 else
     CONFIG_NAME=$1
+    shift
+    EXTRA_ARGS=("$@")
 fi
 
-# NOTE: Set the active robot platform (required for correct action dimension and normalization), supported platforms are LIBERO, ALOHA, BRIDGE, default is LIBERO
-ROBOT_PLATFORM=${2:-${ROBOT_PLATFORM:-"LIBERO"}}
+# NOTE: Set the active robot platform (required for correct action dimension and normalization), supported platforms are LIBERO, ALOHA, BRIDGE, default is LIBERO.
+# If the first extra arg is a hydra override (contains '='), keep default ROBOT_PLATFORM.
+if [ ${#EXTRA_ARGS[@]} -gt 0 ] && [[ "${EXTRA_ARGS[0]}" != *"="* ]]; then
+    ROBOT_PLATFORM="${EXTRA_ARGS[0]}"
+    EXTRA_ARGS=("${EXTRA_ARGS[@]:1}")
+else
+    ROBOT_PLATFORM="${ROBOT_PLATFORM:-"LIBERO"}"
+fi
 
 export ROBOT_PLATFORM
 echo "Using ROBOT_PLATFORM=$ROBOT_PLATFORM"
@@ -47,6 +56,12 @@ echo "NCCL_CUMEM_ENABLE=${NCCL_CUMEM_ENABLE}, NCCL_NVLS_ENABLE=${NCCL_NVLS_ENABL
 LOG_DIR="${REPO_PATH}/logs/$(date +'%Y%m%d-%H:%M:%S')-${CONFIG_NAME}" #/$(date +'%Y%m%d-%H:%M:%S')"
 MEGA_LOG_FILE="${LOG_DIR}/run_embodiment.log"
 mkdir -p "${LOG_DIR}"
-CMD="${PYTHON_BIN} ${SRC_FILE} --config-path ${EMBODIED_PATH}/config/ --config-name ${CONFIG_NAME} runner.logger.log_path=${LOG_DIR}"
-echo ${CMD} > ${MEGA_LOG_FILE}
-${CMD} 2>&1 | tee -a ${MEGA_LOG_FILE}
+CMD=(
+    "${PYTHON_BIN}" "${SRC_FILE}"
+    --config-path "${EMBODIED_PATH}/config/"
+    --config-name "${CONFIG_NAME}"
+    "runner.logger.log_path=${LOG_DIR}"
+)
+CMD+=("${EXTRA_ARGS[@]}")
+echo "${CMD[*]}" > "${MEGA_LOG_FILE}"
+"${CMD[@]}" 2>&1 | tee -a "${MEGA_LOG_FILE}"

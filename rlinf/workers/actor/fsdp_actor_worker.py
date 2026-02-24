@@ -1050,14 +1050,19 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
         state_dict = self.get_model_state_dict(
             cpu_offload=sync_weight_cpu_offload, full_state_dict=True
         )
+        send_handles = []
         for rank in self._weight_dst_rank_in_rollout:
-            self.send(
-                state_dict,
-                self._rollout_group_name,
-                rank,
-                async_op=True,
-                options=self._sync_weight_comm_options,
+            send_handles.append(
+                self.send(
+                    state_dict,
+                    self._rollout_group_name,
+                    rank,
+                    async_op=True,
+                    options=self._sync_weight_comm_options,
+                )
             )
+        for send_handle in send_handles:
+            send_handle.wait()
         if self.enable_offload and not self.is_weight_offloaded:
             self.offload_param_and_grad()
 
