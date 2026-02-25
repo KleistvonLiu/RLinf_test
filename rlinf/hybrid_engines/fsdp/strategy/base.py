@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import glob
+import inspect
 import os
 from abc import ABC, abstractmethod
 from logging import Logger
@@ -279,9 +280,19 @@ class FSDPStrategyBase(ABC):
         Returns:
             - dict: The state dict of the FSDP/FSDP2 wrapped model according to the specified options.
         """
-        opts = StateDictOptions(
-            cpu_offload=cpu_offload, full_state_dict=full_state_dict
-        )
+        opts_kwargs = {
+            "cpu_offload": cpu_offload,
+            "full_state_dict": full_state_dict,
+        }
+        # In multi-rank FSDP full-state exports, some torch versions only
+        # materialize the dict on rank0 unless explicit broadcast is enabled.
+        # Keep behavior version-safe by feature-detecting the option.
+        if full_state_dict and self.world_size > 1:
+            sig = inspect.signature(StateDictOptions)
+            if "broadcast_from_rank0" in sig.parameters:
+                opts_kwargs["broadcast_from_rank0"] = True
+
+        opts = StateDictOptions(**opts_kwargs)
         state_dict = get_model_state_dict(model=model, options=opts)
         return state_dict
 

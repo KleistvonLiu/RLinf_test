@@ -1050,9 +1050,13 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
         state_dict = self.get_model_state_dict(
             cpu_offload=sync_weight_cpu_offload, full_state_dict=True
         )
+        self.log_debug(
+            f"[sync_model_to_rollout rank-{self._rank}] state_dict size: {len(state_dict)}"
+        )
         if not state_dict:
             raise RuntimeError(
-                "Embodied actor produced an empty state_dict during rollout sync. "
+                "Embodied actor produced an empty state_dict during rollout sync "
+                f"(rank={self._rank}, world_size={self._world_size}). "
                 "Please check model wrapping/state-dict export path."
             )
         send_handles = []
