@@ -291,9 +291,34 @@ class FSDPStrategyBase(ABC):
             sig = inspect.signature(StateDictOptions)
             if "broadcast_from_rank0" in sig.parameters:
                 opts_kwargs["broadcast_from_rank0"] = True
+            # Older torch versions expose `rank0_only`; set False so every rank
+            # materializes a full state_dict instead of empty dict on non-zero ranks.
+            if "rank0_only" in sig.parameters:
+                opts_kwargs["rank0_only"] = False
 
         opts = StateDictOptions(**opts_kwargs)
         state_dict = get_model_state_dict(model=model, options=opts)
+
+        if full_state_dict and self.world_size > 1:
+            has_local_state_dict = bool(state_dict)
+            has_state_dict_list = [False for _ in range(self.world_size)]
+            torch.distributed.all_gather_object(
+                has_state_dict_list, has_local_state_dict
+            )
+            if not all(has_state_dict_list):
+                if not any(has_state_dict_list):
+                    raise RuntimeError(
+                        "All ranks produced empty full state_dict for FSDP sync."
+                    )
+                src_rank = has_state_dict_list.index(True)
+                payload = [
+                    state_dict
+                    if torch.distributed.get_rank() == src_rank
+                    else None
+                ]
+                torch.distributed.broadcast_object_list(payload, src=src_rank)
+                state_dict = payload[0]
+
         return state_dict
 
     @abstractmethod
