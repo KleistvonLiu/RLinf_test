@@ -16,6 +16,9 @@
 """Lightweight NCCL diagnostics for single-GPU and multi-GPU runs.
 
 Usage examples:
+    Using Gloo:
+    python toolkits/nccl_probe.py --backend gloo --iters 20 --numel 1024
+
     Single GPU:
         python toolkits/nccl_probe.py --iters 20 --numel 1048576
 
@@ -145,10 +148,22 @@ def parse_args() -> argparse.Namespace:
         help="Force NCCL_SHM_DISABLE=1 in current process.",
     )
     parser.add_argument(
+        "--force-nccl-ignore-cpu-affinity",
+        action="store_true",
+        default=False,
+        help="Force NCCL_IGNORE_CPU_AFFINITY=1 in current process.",
+    )
+    parser.add_argument(
         "--cuda-only-smoke-test",
         action="store_true",
         default=False,
         help="Run a CUDA-only smoke test before distributed initialization.",
+    )
+    parser.add_argument(
+        "--smoke-only",
+        action="store_true",
+        default=False,
+        help="Run CUDA smoke test only and exit without initializing distributed.",
     )
     args = parser.parse_args()
 
@@ -219,6 +234,8 @@ def apply_nccl_env_overrides(args: argparse.Namespace) -> None:
         os.environ["NCCL_IB_DISABLE"] = "1"
     if args.force_nccl_shm_disable:
         os.environ["NCCL_SHM_DISABLE"] = "1"
+    if args.force_nccl_ignore_cpu_affinity:
+        os.environ["NCCL_IGNORE_CPU_AFFINITY"] = "1"
 
 
 def cuda_smoke_test(local_rank: int) -> None:
@@ -340,10 +357,22 @@ def main() -> int:
     """Program entry point."""
     args = parse_args()
     apply_nccl_env_overrides(args)
+    pre_local_rank = int(os.environ.get("LOCAL_RANK", args.device))
+    if args.cuda_only_smoke_test and args.backend == "nccl":
+        try:
+            cuda_smoke_test(pre_local_rank)
+            print(
+                f"[pre-init] CUDA smoke test PASSED on local_rank={pre_local_rank}",
+                flush=True,
+            )
+        except Exception as exc:
+            print(f"[pre-init] CUDA smoke test FAILED: {exc}", file=sys.stderr, flush=True)
+            return 1
+        if args.smoke_only:
+            return 0
+
     ctx = init_dist(args)
     try:
-        if args.cuda_only_smoke_test and args.backend == "nccl":
-            cuda_smoke_test(ctx.local_rank)
         return run_probe(args, ctx)
     except Exception as exc:
         print(f"[rank {ctx.rank}] NCCL probe FAILED: {exc}", file=sys.stderr, flush=True)
