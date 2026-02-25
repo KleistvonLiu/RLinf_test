@@ -120,6 +120,36 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip checking all-reduce result values.",
     )
+    parser.add_argument(
+        "--safe-nccl-env",
+        action="store_true",
+        default=False,
+        help="Set conservative NCCL env defaults in current process.",
+    )
+    parser.add_argument(
+        "--force-nccl-p2p-disable",
+        action="store_true",
+        default=False,
+        help="Force NCCL_P2P_DISABLE=1 in current process.",
+    )
+    parser.add_argument(
+        "--force-nccl-ib-disable",
+        action="store_true",
+        default=False,
+        help="Force NCCL_IB_DISABLE=1 in current process.",
+    )
+    parser.add_argument(
+        "--force-nccl-shm-disable",
+        action="store_true",
+        default=False,
+        help="Force NCCL_SHM_DISABLE=1 in current process.",
+    )
+    parser.add_argument(
+        "--cuda-only-smoke-test",
+        action="store_true",
+        default=False,
+        help="Run a CUDA-only smoke test before distributed initialization.",
+    )
     args = parser.parse_args()
 
     if args.iters <= 0:
@@ -171,6 +201,37 @@ def init_dist(args: argparse.Namespace) -> DistContext:
     )
     created_pg = True
     return DistContext(rank=0, world_size=1, local_rank=local_rank, created_pg=created_pg)
+
+
+def apply_nccl_env_overrides(args: argparse.Namespace) -> None:
+    """Apply NCCL env overrides for this process."""
+    if args.backend != "nccl":
+        return
+
+    if args.safe_nccl_env:
+        os.environ.setdefault("NCCL_CUMEM_ENABLE", "0")
+        os.environ.setdefault("NCCL_NVLS_ENABLE", "0")
+        os.environ.setdefault("TORCH_NCCL_AVOID_RECORD_STREAMS", "1")
+
+    if args.force_nccl_p2p_disable:
+        os.environ["NCCL_P2P_DISABLE"] = "1"
+    if args.force_nccl_ib_disable:
+        os.environ["NCCL_IB_DISABLE"] = "1"
+    if args.force_nccl_shm_disable:
+        os.environ["NCCL_SHM_DISABLE"] = "1"
+
+
+def cuda_smoke_test(local_rank: int) -> None:
+    """Run a lightweight CUDA-only compute/memory smoke test."""
+    if not torch.cuda.is_available():
+        raise RuntimeError("CUDA is not available for smoke test.")
+    torch.cuda.set_device(local_rank)
+    device = torch.device(f"cuda:{local_rank}")
+    x = torch.randn(4096, 4096, device=device, dtype=torch.float32)
+    y = torch.randn(4096, 4096, device=device, dtype=torch.float32)
+    z = x @ y
+    _ = float(z.mean().item())
+    torch.cuda.synchronize(device)
 
 
 def _print_env(rank: int) -> None:
@@ -278,8 +339,11 @@ def run_probe(args: argparse.Namespace, ctx: DistContext) -> int:
 def main() -> int:
     """Program entry point."""
     args = parse_args()
+    apply_nccl_env_overrides(args)
     ctx = init_dist(args)
     try:
+        if args.cuda_only_smoke_test and args.backend == "nccl":
+            cuda_smoke_test(ctx.local_rank)
         return run_probe(args, ctx)
     except Exception as exc:
         print(f"[rank {ctx.rank}] NCCL probe FAILED: {exc}", file=sys.stderr, flush=True)
