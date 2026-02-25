@@ -270,6 +270,17 @@ class FSDPModelManager:
         Returns:
             - dict: The state dict of the FSDP wrapped model according to the specified options
         """
+        if not isinstance(self.model, (FSDP, FSDPModule)):
+            # Single-rank mode can skip FSDP wrapping; use vanilla state_dict to keep
+            # parameter names identical to rollout/inference model definitions.
+            state_dict = self.model.state_dict()
+            if cpu_offload:
+                return {
+                    key: value.cpu() if torch.is_tensor(value) else value
+                    for key, value in state_dict.items()
+                }
+            return state_dict
+
         state_dict = self._strategy.get_model_state_dict(
             self.model, cpu_offload, full_state_dict
         )
